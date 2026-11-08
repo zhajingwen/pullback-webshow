@@ -1,0 +1,22 @@
+[project]
+name = "pullback-webshow"
+version = "0.1.0"
+description = "本地网页：查看 1 分钟 K 线、成交量和回踩前低算法打标的 K 线"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "monitor-hype-volume-rate-multi2-long",
+]
+
+[project.scripts]
+pullback-webshow = "pullback_webshow.__main__:main"
+
+[tool.uv.sources]
+monitor-hype-volume-rate-multi2-long = { path = "../monitor-hype-volume-rate-multi2-long", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pullback_webshow"]

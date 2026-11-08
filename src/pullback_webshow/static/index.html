@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>回踩打标 K 线</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --up: #1baf7a;
+    --down: #e34948;
+    --retest: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --up: #199e70;
+      --down: #e66767;
+      --retest: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    color: var(--text-primary);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header, #legend { padding: 8px 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  #summary, #key { color: var(--text-secondary); }
+  #nav { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  #position { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+  button {
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--axis);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--grid); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #legend {
+    min-height: 78px; /* 留出回踩信息行，出现时图表不跳动 */
+    border-block: 1px solid var(--grid);
+    font-variant-numeric: tabular-nums;
+  }
+  #retest-info { font-weight: 600; }
+  #retest-info::before { content: "▲ "; color: var(--retest); }
+  #retest-info:empty::before { content: ""; }
+  #key::before { content: "▲ "; color: var(--retest); }
+  #chart { flex: 1; min-height: 0; }
+  #error { padding: 16px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1 id="title">回踩打标 K 线</h1>
+    <span id="summary">加载中…</span>
+    <div id="nav">
+      <button id="prev" type="button">上一个</button>
+      <span id="position" aria-live="polite"></span>
+      <button id="next" type="button">下一个</button>
+      <button id="all" type="button">全览</button>
+    </div>
+  </header>
+  <div id="legend">
+    <div id="ohlcv"></div>
+    <div id="retest-info"></div>
+    <div id="key" hidden></div>
+  </div>
+  <div id="chart"></div>
+
+  <script src="lightweight-charts.standalone.production.js"></script>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const pad = (n) => String(n).padStart(2, "0");
+
+    // 图表内部使用真实 UTC 时间戳，只在显示时转为浏览器本地时区
+    function formatTime(ms, withDate = true) {
+      const d = new Date(ms);
+      const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      return withDate ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${clock}` : clock;
+    }
+
+    function createChart(el) {
+      const { TickMarkType } = LightweightCharts;
+      const chart = LightweightCharts.createChart(el, {
+        autoSize: true,
+        layout: {
+          background: { type: "solid", color: css("--surface") },
+          textColor: css("--text-secondary"),
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          panes: { separatorColor: css("--axis") },
+        },
+        grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+        // 固定最小宽度：否则缩放时价格轴变宽，会裁掉 fitContent 后最左侧的 K 线
+        rightPriceScale: { borderColor: css("--axis"), minimumWidth: 80 },
+        // 默认最小柱宽放不下全部 1m K 线，调小后 fitContent 才能显示全部
+        timeScale: {
+          borderColor: css("--axis"),
+          minBarSpacing: 0.01,
+          timeVisible: true,
+          secondsVisible: false,
+          tickMarkFormatter: (t, type) => formatTime(t * 1000, type !== TickMarkType.Time),
+        },
+        localization: { timeFormatter: (t) => formatTime(t * 1000) },
+      });
+      const up = css("--up");
+      const down = css("--down");
+      const candles = chart.addSeries(LightweightCharts.CandlestickSeries, {
+        upColor: up,
+        downColor: down,
+        wickUpColor: up,
+        wickDownColor: down,
+        borderVisible: false,
+        priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+      });
+      const volume = chart.addSeries(
+        LightweightCharts.HistogramSeries,
+        { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false },
+        1,
+      );
+      const [pricePane, volumePane] = chart.panes();
+      pricePane.setStretchFactor(4);
+      volumePane.setStretchFactor(1);
+      return { chart, candles, volume, up, down };
+    }
+
+    function render(data) {
+      const { coin, bars, retests, params, tf_minutes: tf } = data;
+      const barIndex = new Map(bars.map((b, i) => [b[0], i]));
+      const retestAt = new Map(retests.map((r, i) => [r.time_ms, i]));
+
+      $("title").textContent = `${coin} 1 分钟 K 线`;
+      $("summary").textContent =
+        `${bars.length.toLocaleString()} 根（${formatTime(bars[0][0])} ~ ${formatTime(bars.at(-1)[0])}，本地时区）`
+        + ` · 回踩 ${retests.length} 次`
+        + ` · ${tf}m ATR${params.atr_len} drop ${params.drop_atr} / bounce ${params.bounce_atr}`
+        + ` / touch ${params.touch_atr} / break ${params.break_atr} / abandon ${params.abandon_atr}`;
+      $("key").hidden = false;
+      $("key").textContent =
+        `数字 = 该前低的第几次回踩；标在所属 ${tf}m 内首次触及阈值的 1m 上，算法要等这根 ${tf}m 收盘才确认`;
+
+      const { chart, candles, volume, up, down } = createChart($("chart"));
+      candles.setData(bars.map(([t, open, high, low, close]) => ({ time: t / 1000, open, high, low, close })));
+      volume.setData(bars.map(([t, open, , , close, value]) => ({
+        time: t / 1000,
+        value,
+        color: close >= open ? up : down,
+      })));
+      LightweightCharts.createSeriesMarkers(candles, retests.map((r) => ({
+        time: r.time_ms / 1000,
+        position: "belowBar",
+        shape: "arrowUp",
+        color: css("--retest"),
+        text: String(r.nth),
+      })));
+      chart.timeScale().fitContent();
+
+      let current = -1; // 当前跳转到的回踩，-1 表示尚未跳转
+
+      function showBar(ms) {
+        const [t, o, h, l, c, v] = bars[barIndex.get(ms)];
+        $("ohlcv").textContent =
+          `${formatTime(t)}  开 ${o.toFixed(3)}  高 ${h.toFixed(3)}  低 ${l.toFixed(3)}  收 ${c.toFixed(3)}`
+          + `  量 ${v.toLocaleString()}`;
+        const i = retestAt.get(ms);
+        const r = i === undefined ? null : retests[i];
+        $("retest-info").textContent = r
+          ? `第 ${r.nth} 次回踩  前低 ${r.anchor.toFixed(3)}  阈值 ${r.threshold.toFixed(3)}`
+            + `  ATR ${r.atr.toFixed(4)}  所属 ${tf}m：${formatTime(r.tf_start_ms)}（收盘后确认）`
+          : "";
+      }
+
+      // 鼠标离开图表时，显示当前回踩；还没跳转过则显示最新一根
+      const restingBar = () => (current >= 0 ? retests[current].time_ms : bars.at(-1)[0]);
+
+      chart.subscribeCrosshairMove((param) => {
+        showBar(param.time === undefined ? restingBar() : param.time * 1000);
+      });
+
+      function jump(i) {
+        current = i;
+        const r = retests[i];
+        const idx = barIndex.get(r.time_ms);
+        chart.timeScale().setVisibleLogicalRange({ from: idx - 60, to: idx + 60 });
+        // 新的可见范围要到下一帧才生效，提前定位十字线会落在错误的 K 线上
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (current === i) chart.setCrosshairPosition(r.anchor, r.time_ms / 1000, candles);
+        }));
+        showBar(r.time_ms);
+        $("position").textContent = `${i + 1} / ${retests.length}`;
+        $("prev").disabled = i === 0;
+        $("next").disabled = i === retests.length - 1;
+      }
+
+      $("position").textContent = `— / ${retests.length}`;
+      $("prev").disabled = $("next").disabled = retests.length === 0;
+      $("prev").onclick = () => jump(current < 0 ? retests.length - 1 : current - 1);
+      $("next").onclick = () => jump(current + 1);
+      $("all").onclick = () => {
+        chart.clearCrosshairPosition();
+        chart.timeScale().fitContent();
+      };
+      showBar(restingBar());
+
+      window.__webshow = { chart, jump }; // 便于在控制台检查
+    }
+
+    function showError(message) {
+      $("summary").textContent = "";
+      $("chart").textContent = "";
+      const div = document.createElement("div");
+      div.id = "error";
+      div.textContent = message;
+      $("chart").append(div);
+    }
+
+    fetch("api/data")
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        if (data.bars.length === 0) throw new Error(`库中没有 ${data.coin} 的 1m K 线`);
+        render(data);
+      })
+      .catch((e) => showError(`加载失败：${e.message}`));
+  </script>
+</body>
+</html>
