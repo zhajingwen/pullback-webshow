@@ -1,4 +1,4 @@
-"""读取 1m K 线，回放回踩前低状态机，并把 5m 上的回踩映射到 1m K 线。"""
+"""读取 1m K 线，回放回踩前低状态机，并把状态机周期（默认 1m）上的回踩映射到 1m K 线。"""
 
 import sqlite3
 from collections import defaultdict
@@ -77,6 +77,7 @@ def find_retests(bars: Sequence[Bar], tf_ms: int, params: PullbackParams) -> Lis
                 "anchor": event.anchor,
                 "atr": tracker.atr,
                 "threshold": threshold,
+                "anchor_spike": event.anchor_spike,
             }
         )
     return retests

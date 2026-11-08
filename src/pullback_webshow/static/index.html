@@ -155,10 +155,12 @@
         `${bars.length.toLocaleString()} 根（${formatTime(bars[0][0])} ~ ${formatTime(bars.at(-1)[0])}，本地时区）`
         + ` · 回踩 ${retests.length} 次`
         + ` · ${tf}m ATR${params.atr_len} drop ${params.drop_atr} / bounce ${params.bounce_atr}`
-        + ` / touch ${params.touch_atr} / break ${params.break_atr} / abandon ${params.abandon_atr}`;
+        + ` / touch ${params.touch_atr} / break ${params.break_atr} / abandon ${params.abandon_atr}`
+        + ` · 缺口容忍 ${params.max_gap_ms / 60000}m · 放量 ±${params.spike_window}/${params.spike_base}`;
       $("key").hidden = false;
-      $("key").textContent =
-        `数字 = 该前低的第几次回踩；标在所属 ${tf}m 内首次触及阈值的 1m 上，算法要等这根 ${tf}m 收盘才确认`;
+      $("key").textContent = tf === 1
+        ? "数字 = 该前低的第几次回踩；标在触发回踩的 1m 上，算法要等这根 1m 收盘才确认"
+        : `数字 = 该前低的第几次回踩；标在所属 ${tf}m 内首次触及阈值的 1m 上，算法要等这根 ${tf}m 收盘才确认`;
 
       const { chart, candles, volume, up, down } = createChart($("chart"));
       candles.setData(bars.map(([t, open, high, low, close]) => ({ time: t / 1000, open, high, low, close })));
@@ -187,7 +189,9 @@
         const r = i === undefined ? null : retests[i];
         $("retest-info").textContent = r
           ? `第 ${r.nth} 次回踩  前低 ${r.anchor.toFixed(3)}  阈值 ${r.threshold.toFixed(3)}`
-            + `  ATR ${r.atr.toFixed(4)}  所属 ${tf}m：${formatTime(r.tf_start_ms)}（收盘后确认）`
+            + `  ATR ${r.atr.toFixed(4)}`
+            + `  锚点放量 ${r.anchor_spike == null ? "—" : r.anchor_spike.toFixed(1) + "x"}`
+            + (tf === 1 ? "（收盘后确认）" : `  所属 ${tf}m：${formatTime(r.tf_start_ms)}（收盘后确认）`)
           : "";
       }
 
